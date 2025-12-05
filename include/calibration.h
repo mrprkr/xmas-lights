@@ -2,7 +2,8 @@
 #define CALIBRATION_H
 
 #include <Arduino.h>
-#include <SPIFFS.h>
+#include <SD.h>
+#include <SPI.h>
 #include <ArduinoJson.h>
 #include "config.h"
 
@@ -16,6 +17,9 @@ class Calibration {
 public:
     Calibration();
     bool begin();
+
+    // SD card status
+    bool isSDAvailable() const { return _sdAvailable; }
 
     // Position management
     void setPosition(uint16_t index, float x, float y, float z);
@@ -45,8 +49,11 @@ public:
 private:
     LEDPosition _positions[NUM_LEDS];
     int16_t _calibrationLED;  // -1 = not calibrating
+    bool _sdAvailable;
+    SPIClass* _sdSPI;
 
-    static const char* CALIBRATION_FILE;
+    bool initSD();
+    bool ensureDirectory(const char* path);
 };
 
 #endif // CALIBRATION_H

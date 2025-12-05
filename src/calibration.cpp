@@ -1,26 +1,76 @@
 #include "calibration.h"
 #include <algorithm>
 
-const char* Calibration::CALIBRATION_FILE = "/calibration.json";
-
-Calibration::Calibration() : _calibrationLED(-1) {
+Calibration::Calibration()
+    : _calibrationLED(-1)
+    , _sdAvailable(false)
+    , _sdSPI(nullptr) {
     resetToLinear();
 }
 
 bool Calibration::begin() {
-    if (!SPIFFS.begin(true)) {
-        Serial.println("SPIFFS mount failed");
+    // Skip SD card for now - pin conflict with display
+    // TODO: Find correct SD card pins for ESP32-S3-LCD-2
+    Serial.println("SD card disabled (pin conflict), using defaults");
+    _sdAvailable = false;
+
+    Serial.println("Using default linear calibration");
+    return true;
+}
+
+bool Calibration::initSD() {
+    Serial.println("Initializing SD card...");
+
+    // Create SPI instance for SD card
+    _sdSPI = new SPIClass(HSPI);
+    _sdSPI->begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
+
+    // Try to mount SD card
+    if (!SD.begin(SD_CS, *_sdSPI)) {
+        Serial.println("SD card mount failed");
+        delete _sdSPI;
+        _sdSPI = nullptr;
         return false;
     }
 
-    if (SPIFFS.exists(CALIBRATION_FILE)) {
-        if (load()) {
-            Serial.println("Calibration loaded from SPIFFS");
-            return true;
-        }
+    uint8_t cardType = SD.cardType();
+    if (cardType == CARD_NONE) {
+        Serial.println("No SD card attached");
+        return false;
     }
 
-    Serial.println("Using default linear calibration");
+    Serial.print("SD Card Type: ");
+    switch (cardType) {
+        case CARD_MMC:  Serial.println("MMC"); break;
+        case CARD_SD:   Serial.println("SDSC"); break;
+        case CARD_SDHC: Serial.println("SDHC"); break;
+        default:        Serial.println("UNKNOWN"); break;
+    }
+
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("SD Card Size: %lluMB\n", cardSize);
+
+    // Ensure directory exists
+    ensureDirectory(CALIBRATION_FILE_PATH);
+
+    return true;
+}
+
+bool Calibration::ensureDirectory(const char* path) {
+    // Extract directory from path
+    String dirPath = String(path);
+    int lastSlash = dirPath.lastIndexOf('/');
+    if (lastSlash > 0) {
+        dirPath = dirPath.substring(0, lastSlash);
+
+        if (!SD.exists(dirPath)) {
+            Serial.printf("Creating directory: %s\n", dirPath.c_str());
+            if (!SD.mkdir(dirPath)) {
+                Serial.println("Failed to create directory");
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -87,7 +137,15 @@ void Calibration::getSortedByRadius(uint16_t* outIndices) const {
 }
 
 bool Calibration::save() {
-    File file = SPIFFS.open(CALIBRATION_FILE, "w");
+    if (!_sdAvailable) {
+        Serial.println("SD card not available for saving");
+        return false;
+    }
+
+    // Ensure directory exists
+    ensureDirectory(CALIBRATION_FILE_PATH);
+
+    File file = SD.open(CALIBRATION_FILE_PATH, FILE_WRITE);
     if (!file) {
         Serial.println("Failed to open calibration file for writing");
         return false;
@@ -110,13 +168,23 @@ bool Calibration::save() {
     }
 
     file.close();
-    Serial.println("Calibration saved");
+    Serial.println("Calibration saved to SD card");
     return true;
 }
 
 bool Calibration::load() {
-    File file = SPIFFS.open(CALIBRATION_FILE, "r");
+    if (!_sdAvailable) {
+        return false;
+    }
+
+    if (!SD.exists(CALIBRATION_FILE_PATH)) {
+        Serial.println("Calibration file not found on SD card");
+        return false;
+    }
+
+    File file = SD.open(CALIBRATION_FILE_PATH, FILE_READ);
     if (!file) {
+        Serial.println("Failed to open calibration file for reading");
         return false;
     }
 

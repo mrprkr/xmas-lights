@@ -1,5 +1,8 @@
 #include "led_controller.h"
 
+// ESP32-S3 uses the RMT driver for FastLED
+// Make sure FASTLED_RMT_BUILTIN_DRIVER is enabled for ESP32-S3
+
 LEDController::LEDController(Calibration& calibration)
     : _calibration(calibration)
     , _isOn(true)
